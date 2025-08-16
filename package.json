@@ -1,0 +1,25 @@
+{
+	"name": "volcanoes-mcp",
+	"version": "1.0.0",
+	"main": "index.js",
+	"type": "module",
+	"bin": {
+		"volcanoes-mcp": "./build/index.js"
+	},
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1",
+		"build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\""
+	},
+	"files": ["build"],
+	"keywords": ["volcanoes", "geology", "smithsonian", "gvp", "eruptions", "volcanic-activity", "wfs", "geospatial"],
+	"author": "Blake Morgan",
+	"license": "MIT",
+	"description": "MCP server for accessing Smithsonian Global Volcanism Program data including volcano profiles, eruption records, and real-time volcanic activity",
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.0.4",
+		"@types/node": "^22.10.2",
+		"node-fetch": "^3.3.2",
+		"typescript": "^5.7.2",
+		"zod": "^3.24.1"
+	}
+}
