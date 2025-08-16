@@ -419,7 +419,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                     properties: {
                         volcano_name: {
                             type: "string",
-                            description: "Name of the volcano (e.g., 'Mount Fuji', 'Kilauea', 'Vesuvius')",
+                            description: "Name of the volcano (e.g., 'Mount Fuji', 'Kilauea', 'Vesuvius'), volcano number (e.g., '311280'), or location description (e.g., 'volcano near Seattle')",
                         },
                         include_eruptions: {
                             type: "boolean",
@@ -482,6 +482,22 @@ async function buildWFSQuery(layer, filters, limit = 50) {
         params.set("CQL_FILTER", filters.join(" AND "));
     }
     return `${BASE_WFS_URL}?${params}`;
+}
+async function getVolcanoNumberByName(volcanoName) {
+    try {
+        // Search eruptions table for volcano name to get volcano number
+        const filters = [`UPPER(Volcano_Name) LIKE UPPER('%${volcanoName}%')`];
+        const url = await buildWFSQuery("Smithsonian_VOTW_Holocene_Eruptions", filters, 1);
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.features && data.features.length > 0) {
+            return data.features[0].properties.Volcano_Number;
+        }
+        return null;
+    }
+    catch (error) {
+        return null;
+    }
 }
 function cleanResponse(data, verbose = false) {
     if (!data || !data.features)
@@ -617,18 +633,80 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         else if (request.params.name === "get-volcano-details") {
             const args = request.params.arguments;
-            const volcanoName = args.volcano_name;
-            // First get volcano profile
-            const volcanoFilters = [`VolcanoName LIKE '%${volcanoName}%'`];
+            const volcanoIdentifier = args.volcano_name;
+            // Determine if input is a number (volcano number) or name
+            const isNumber = /^\d+$/.test(volcanoIdentifier);
+            let volcanoNumber;
+            if (isNumber) {
+                volcanoNumber = parseInt(volcanoIdentifier);
+            }
+            else {
+                // For names, first search eruptions to get volcano number
+                const eruptionFilters = [`Volcano_Name LIKE '%${volcanoIdentifier}%'`];
+                const eruptionUrl = await buildWFSQuery("Smithsonian_VOTW_Holocene_Eruptions", eruptionFilters, 1);
+                const eruptionResponse = await fetch(eruptionUrl);
+                const eruptionText = await eruptionResponse.text();
+                let eruptionLookup;
+                try {
+                    eruptionLookup = JSON.parse(eruptionText);
+                }
+                catch (error) {
+                    throw new Error(`Failed to search for volcano "${volcanoIdentifier}". Server error.`);
+                }
+                if (!eruptionLookup.features || eruptionLookup.features.length === 0) {
+                    // Fallback: search volcano profiles directly (for volcanoes without eruption records)
+                    const volcanoProfileFilters = [`Volcano_Name LIKE '%${volcanoIdentifier}%'`];
+                    const volcanoProfileUrl = await buildWFSQuery("Smithsonian_VOTW_Holocene_Volcanoes", volcanoProfileFilters, 5);
+                    const volcanoProfileResponse = await fetch(volcanoProfileUrl);
+                    const volcanoProfileText = await volcanoProfileResponse.text();
+                    let volcanoProfileLookup;
+                    try {
+                        volcanoProfileLookup = JSON.parse(volcanoProfileText);
+                    }
+                    catch (error) {
+                        throw new Error(`No volcano found matching "${volcanoIdentifier}". Try using the exact volcano name or volcano number.`);
+                    }
+                    if (!volcanoProfileLookup.features || volcanoProfileLookup.features.length === 0) {
+                        throw new Error(`No volcano found matching "${volcanoIdentifier}". Try using the exact volcano name, volcano number, or nearby location.`);
+                    }
+                    // If multiple matches, take the first one
+                    volcanoNumber = volcanoProfileLookup.features[0].properties.Volcano_Number;
+                }
+                else {
+                    volcanoNumber = eruptionLookup.features[0].properties.Volcano_Number;
+                }
+            }
+            // Get volcano profile using volcano number (always use number for reliability)
+            const volcanoFilters = [`Volcano_Number = ${volcanoNumber}`];
             const volcanoUrl = await buildWFSQuery("Smithsonian_VOTW_Holocene_Volcanoes", volcanoFilters, 10);
             const volcanoResponse = await fetch(volcanoUrl);
-            const volcanoData = cleanResponse(await volcanoResponse.json(), args.verbose);
+            // Check if response is valid JSON
+            const volcanoText = await volcanoResponse.text();
+            let volcanoData;
+            try {
+                volcanoData = cleanResponse(JSON.parse(volcanoText), args.verbose);
+            }
+            catch (error) {
+                throw new Error(`Failed to find volcano profile for volcano number ${volcanoNumber}. Server response: ${volcanoText.substring(0, 200)}...`);
+            }
+            // Check if we found the volcano profile
+            if (!volcanoData.features || volcanoData.features.length === 0) {
+                throw new Error(`No volcano profile found for volcano number ${volcanoNumber}.`);
+            }
             if (args.include_eruptions !== false) {
-                // Then get eruption history
-                const eruptionFilters = [`Volcano_Name LIKE '%${volcanoName}%'`];
+                // Get eruption history using the volcano number
+                const eruptionFilters = [`Volcano_Number = ${volcanoNumber}`];
                 const eruptionUrl = await buildWFSQuery("Smithsonian_VOTW_Holocene_Eruptions", eruptionFilters, args.eruption_limit || 20);
                 const eruptionResponse = await fetch(eruptionUrl);
-                const eruptionData = cleanResponse(await eruptionResponse.json(), args.verbose);
+                const eruptionText = await eruptionResponse.text();
+                let eruptionData;
+                try {
+                    eruptionData = cleanResponse(JSON.parse(eruptionText), args.verbose);
+                }
+                catch (error) {
+                    // If eruption data fails, just return empty eruption data
+                    eruptionData = { type: "FeatureCollection", features: [], totalFeatures: 0, numberReturned: 0 };
+                }
                 data = {
                     volcano_profile: volcanoData,
                     eruption_history: eruptionData,
