@@ -14,7 +14,7 @@
 	"keywords": ["volcanoes", "geology", "smithsonian", "gvp", "eruptions", "volcanic-activity", "wfs", "geospatial"],
 	"author": "Blake Morgan",
 	"license": "MIT",
-	"description": "MCP server for accessing Smithsonian Global Volcanism Program data including volcano profiles, eruption records, and real-time volcanic activity",
+	"description": "MCP server for accessing Smithsonian Global Volcanism Program data including volcano profiles, eruption records, and volcanic activity",
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.0.4",
 		"@types/node": "^22.10.2",
